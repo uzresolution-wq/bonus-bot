@@ -1,12 +1,11 @@
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command, StateFilter
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram import F
 import sqlite3
 
 # ========== КОНФИГ ==========
@@ -54,7 +53,8 @@ admin_reply_mode = {}
 logging.basicConfig(level=logging.INFO)
 storage = MemoryStorage()
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(storage=storage)
+dp = Dispatcher(bot, storage=storage)
+dp.middleware.setup(LoggingMiddleware())
 
 # ========== ВИЛОЯТЛАР ВА ТУМАНЛАР ==========
 REGIONS = {
@@ -90,7 +90,7 @@ REGIONS = {
     }
 }
 
-# ========== ТУГМАЛАР (AIORAM 3.x) ==========
+# ========== ТУГМАЛАР ==========
 def get_start_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="▶️ START")]],
@@ -225,7 +225,7 @@ async def show_admin_menu(message: types.Message):
     )
 
 # ========== START ==========
-@dp.message(Command("start"))
+@dp.message_handler(commands=['start'])
 async def start_command(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     
@@ -242,7 +242,7 @@ async def start_command(message: types.Message, state: FSMContext):
     else:
         await send_welcome_without_image(message, state)
 
-@dp.message(F.text == "▶️ START")
+@dp.message_handler(lambda message: message.text == "▶️ START")
 async def start_button(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     
@@ -260,7 +260,7 @@ async def start_button(message: types.Message, state: FSMContext):
         await send_welcome_without_image(message, state)
 
 # ========== ТИЛ ТАНЛАШ ==========
-@dp.message(RegistrationStates.language)
+@dp.message_handler(state=RegistrationStates.language)
 async def select_language(message: types.Message, state: FSMContext):
     if message.text in ["🇺🇿 O'zbek", "🇷🇺 Русский"]:
         lang = "uz" if "O'zbek" in message.text else "ru"
@@ -281,7 +281,7 @@ async def select_language(message: types.Message, state: FSMContext):
         await message.answer("Iltimos, tugmalardan birini tanlang / Пожалуйста, выберите кнопку")
 
 # ========== ВИЛОЯТ ТАНЛАШ ==========
-@dp.message(RegistrationStates.region)
+@dp.message_handler(state=RegistrationStates.region)
 async def select_region(message: types.Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get('language', 'uz')
@@ -304,7 +304,7 @@ async def select_region(message: types.Message, state: FSMContext):
         await message.answer("Iltimos, viloyatni tugmalardan tanlang")
 
 # ========== ТУМАН ТАНЛАШ ==========
-@dp.message(RegistrationStates.district)
+@dp.message_handler(state=RegistrationStates.district)
 async def select_district(message: types.Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get('language', 'uz')
@@ -321,7 +321,7 @@ async def select_district(message: types.Message, state: FSMContext):
         await message.answer("Iltimos, tumanni tugmalardan tanlang")
 
 # ========== ТЕЛЕФОН РАҚАМ ==========
-@dp.message(RegistrationStates.phone, F.contact)
+@dp.message_handler(state=RegistrationStates.phone, content_types=types.ContentType.CONTACT)
 async def handle_phone(message: types.Message, state: FSMContext):
     contact = message.contact
     user_id = message.from_user.id
@@ -335,7 +335,7 @@ async def handle_phone(message: types.Message, state: FSMContext):
           contact.phone_number, data.get('region'), data.get('district'), lang))
     conn.commit()
     
-    await state.clear()
+    await state.finish()
     
     if lang == "uz":
         await message.answer(
@@ -354,8 +354,9 @@ async def handle_phone(message: types.Message, state: FSMContext):
             parse_mode="Markdown"
         )
 
-@dp.message(RegistrationStates.phone)
-async def phone_error(message: types.Message, state: FSMContext):
+@dp.message_handler(state=RegistrationStates.phone)
+async def phone_error(message: types.Message):
+    state = dp.current_state(user=message.from_user.id)
     data = await state.get_data()
     lang = data.get('language', 'uz') if data else 'uz'
     if lang == "uz":
@@ -364,7 +365,7 @@ async def phone_error(message: types.Message, state: FSMContext):
         await message.answer("❗ Пожалуйста, отправьте номер телефона через кнопку ниже")
 
 # ========== PROFIL ==========
-@dp.message(F.text.in_(["👤 Mening profilim", "👤 Мой профиль"]))
+@dp.message_handler(lambda message: message.text in ["👤 Mening profilim", "👤 Мой профиль"])
 async def show_profile(message: types.Message):
     user_id = message.from_user.id
     cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
@@ -389,7 +390,7 @@ async def show_profile(message: types.Message):
         await message.answer(text, parse_mode="Markdown")
 
 # ========== PROMOKOD ==========
-@dp.message(F.text.in_(["🎁 Promokod yuborish", "🎁 Отправить промокод"]))
+@dp.message_handler(lambda message: message.text in ["🎁 Promokod yuborish", "🎁 Отправить промокод"])
 async def send_promo_code(message: types.Message, state: FSMContext):
     cursor.execute("SELECT language FROM users WHERE user_id = ?", (message.from_user.id,))
     user = cursor.fetchone()
@@ -407,14 +408,14 @@ async def send_promo_code(message: types.Message, state: FSMContext):
         )
     await state.set_state(RegistrationStates.promo_code)
 
-@dp.message(RegistrationStates.promo_code)
+@dp.message_handler(state=RegistrationStates.promo_code)
 async def handle_promo_code(message: types.Message, state: FSMContext):
     cursor.execute("SELECT language FROM users WHERE user_id = ?", (message.from_user.id,))
     user = cursor.fetchone()
     lang = user[0] if user else "uz"
     
     if message.text in ["◀️ Orqaga", "◀️ Назад"]:
-        await state.clear()
+        await state.finish()
         await show_user_menu(message, lang)
         return
     
@@ -459,7 +460,7 @@ async def handle_promo_code(message: types.Message, state: FSMContext):
                 reply_markup=get_user_keyboard(lang),
                 parse_mode="Markdown"
             )
-        await state.clear()
+        await state.finish()
     else:
         if lang == "uz":
             await message.answer("❌ Iltimos, 6 xonali promokod yuboring!")
@@ -467,7 +468,7 @@ async def handle_promo_code(message: types.Message, state: FSMContext):
             await message.answer("❌ Пожалуйста, отправьте 6-значный промокод!")
 
 # ========== ADMIN REPLY ==========
-@dp.callback_query(lambda c: c.data and c.data.startswith('reply_'))
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith('reply_'))
 async def admin_reply_callback(callback_query: types.CallbackQuery):
     user_id = int(callback_query.data.split('_')[1])
     
@@ -486,7 +487,7 @@ async def admin_reply_callback(callback_query: types.CallbackQuery):
     await callback_query.answer()
 
 # ========== ADMIN 9 TA BONUS TUGMALARI ==========
-@dp.message(F.text.in_([
+@dp.message_handler(lambda message: message.from_user.id == ADMIN_ID and message.text in [
     "🎉Tabriklaymiz siz \"MUZLATGICH\" bonusiga ega bo'ldingiz🎉",
     "🎉Tabriklaymiz siz \"AVTOMAT KIR YUVISH MASHINASI\" bonusiga ega bo'ldingiz🎉",
     "🎉Tabriklaymiz siz \"KONDITSIONER\" bonusiga ega bo'ldingiz🎉",
@@ -496,7 +497,7 @@ async def admin_reply_callback(callback_query: types.CallbackQuery):
     "🎉Tabriklaymiz siz \"CHANGYUTGICH\" bonusiga ega bo'ldingiz🎉",
     "🎉Tabriklaymiz siz \"MINI KONDITSIONER\" bonusiga ega bo'ldingiz🎉",
     "🎉Tabriklaymiz siz \"GAZ PLITA\" bonusiga ega bo'ldingiz🎉"
-]))
+])
 async def admin_bonus_reply(message: types.Message):
     if ADMIN_ID in admin_reply_mode:
         target_user_id = admin_reply_mode[ADMIN_ID]
@@ -521,11 +522,8 @@ async def admin_bonus_reply(message: types.Message):
     await message.answer("❗ Avval 'Javob yozish' tugmasini bosing!", reply_markup=get_admin_keyboard())
 
 # ========== ADMIN MATN QABUL QILISH ==========
-@dp.message(F.text)
+@dp.message_handler(lambda message: message.from_user.id == ADMIN_ID)
 async def admin_handle_message(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    
     if message.text == "❌ Bekor qilish":
         if ADMIN_ID in admin_reply_mode:
             del admin_reply_mode[ADMIN_ID]
@@ -627,9 +625,6 @@ async def admin_handle_message(message: types.Message):
     )
 
 # ========== ИШГА ТУШИРИШ ==========
-async def main():
-    print("🤖 Bot ishga tushdi...")
-    await dp.start_polling(bot)
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    from aiogram import executor
+    executor.start_polling(dp, skip_updates=True)
