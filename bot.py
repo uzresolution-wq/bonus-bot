@@ -9,7 +9,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 import sqlite3
 
 # ========== КОНФИГ ==========
-BOT_TOKEN = "8955397294:AAFJLJICXY2Lyzp2ROkmNY3lj5ugai2ILYc"
+BOT_TOKEN = "8955397294:AAF-telgAKSV-iSTIUlJ60DpJlyd8WirbFA"
 ADMIN_ID = 8614033857
 
 # ========== ДАТАБАЗА ==========
